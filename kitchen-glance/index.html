@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="냉장고에 있는 재료로 오늘의 저녁 메뉴를 찾아보세요.">
+  <meta name="theme-color" content="#f8fafc">
+  <title>Kitchen Glance · 내 냉장고</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="recipes.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#fridge" aria-label="Kitchen Glance 내 냉장고">
+        <img src="assets/favicon.svg" alt="" width="40" height="40">
+        <span>Kitchen Glance</span>
+      </a>
+      <nav class="nav" aria-label="주 메뉴">
+        <a href="#fridge" data-nav="fridge"><span data-icon="fridge"></span>내 냉장고</a>
+        <a href="#recommend" data-nav="recommend"><span data-icon="utensils"></span>메뉴 추천</a>
+      </nav>
+    </div>
+  </header>
+  <main id="app" class="page"></main>
+  <div class="toast" role="status" aria-live="polite"></div>
+  <dialog id="deduct" aria-labelledby="sheet-title"></dialog>
+</body>
+</html>
