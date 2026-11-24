@@ -6,6 +6,7 @@ const iconPaths = {
   grain: '<path d="M3 12h18a9 9 0 0 1-18 0Zm6 8h6M8 8c2-1-1-2 1-4m4 4c2-1-1-2 1-4"/>',
   jar: '<path d="M7 3h10v4H7zM8 7l-2 3v9a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-9l-2-3M6 13h12"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="m5 12 4 4 10-10"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   arrow: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
@@ -21,7 +22,8 @@ const sheet = document.querySelector('#deduct');
 const toast = document.querySelector('.toast');
 const fridgeKey = 'kitchen-glance-fridge';
 const refreshKey = 'kitchen-glance-refresh';
-let owned = getOwned();
+const namePattern = /^[가-힣]+(?: [가-힣]+)*$/;
+let {owned, custom} = readFridge();
 let category = 'all';
 let query = '';
 let offset = 0;
@@ -44,20 +46,42 @@ function readStorage(key, fallback) {
   }
 }
 
-function getOwned() {
-  const stored = readStorage(fridgeKey, []);
-  return new Set(Array.isArray(stored) ? stored.filter(id => Object.hasOwn(ingredients, id)).slice(0, 30) : []);
+function nameKey(name) {
+  return name.replace(/ /g, '');
 }
 
-function saveOwned(next) {
+function validName(name) {
+  return typeof name === 'string' && namePattern.test(name) && nameKey(name).length <= 10;
+}
+
+function customId(name) {
+  return `custom-${nameKey(name)}`;
+}
+
+function readFridge() {
+  const stored = readStorage(fridgeKey, []);
+  const names = Array.isArray(stored.custom) ? stored.custom.filter(validName) : [];
+  const custom = new Map(names.map(name => [customId(name), {name, emoji:'🧺'}]));
+  const ids = Array.isArray(stored) ? stored : stored.owned;
+  const available = Array.isArray(ids)
+    ? ids.filter(id => typeof id === 'string' && (Object.hasOwn(ingredients, id) || custom.has(id))) : [];
+  return {owned: new Set([...new Set(available)].slice(0, 30)), custom};
+}
+
+function saveFridge(next) {
   try {
-    localStorage.setItem(fridgeKey, JSON.stringify([...next]));
-    owned = next;
+    const names = [...next.custom.values()].map(item => item.name);
+    localStorage.setItem(fridgeKey, JSON.stringify({owned: [...next.owned], custom: names}));
+    ({owned, custom} = next);
     offset = 0;
     return true;
   } catch {
     return false;
   }
+}
+
+function ingredientInfo(id) {
+  return custom.get(id) ?? ingredients[id];
 }
 
 function showToast(message) {
@@ -71,11 +95,11 @@ function showToast(message) {
 }
 
 function symbol(id) {
-  return `<span class="emoji" aria-hidden="true">${ingredients[id].emoji}</span>`;
+  return `<span class="emoji" aria-hidden="true">${ingredientInfo(id).emoji}</span>`;
 }
 
 function chip(id) {
-  return `<button type="button" class="chip" data-ingredient="${id}" aria-pressed="${owned.has(id)}">${symbol(id)}${ingredients[id].name}<span class="check">${icon('check', 14)}</span></button>`;
+  return `<button type="button" class="chip" data-ingredient="${id}" aria-pressed="${owned.has(id)}">${symbol(id)}${ingredientInfo(id).name}<span class="check">${icon('check', 14)}</span></button>`;
 }
 
 function renderFridge() {
@@ -93,15 +117,26 @@ function renderFridge() {
           <div><h2 id="catalog-title">식재료 선택</h2><p>재료를 눌러 냉장고에 담거나 빼세요.</p></div>
           <span class="count" id="selection-count"></span>
         </div>
-        <div class="search-box">
-          ${icon('search', 19)}
-          <input id="search" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="식재료 검색" aria-describedby="search-error" placeholder="재료명 또는 초성을 검색해 보세요">
-          <button type="button" data-action="clear" aria-label="검색어 지우기" hidden>${icon('close', 17)}</button>
+        <div class="catalog-tools">
+          <div class="search-box">
+            ${icon('search', 19)}
+            <input id="search" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="식재료 검색" aria-describedby="search-error" placeholder="재료명 또는 초성 검색">
+            <button type="button" data-action="clear" aria-label="검색어 지우기" hidden>${icon('close', 17)}</button>
+          </div>
+          <button type="button" class="secondary add-toggle" data-action="add" aria-controls="ingredient-form" aria-expanded="false">${icon('plus', 16)} 재료 추가</button>
         </div>
         <p id="search-error" class="field-error" role="alert" hidden>한글 10자 이내로 입력해 주세요</p>
+        <form id="ingredient-form" class="ingredient-form" hidden>
+          <label for="ingredient-name">새 식재료 이름</label>
+          <div class="catalog-tools">
+            <div class="search-box">
+              <input id="ingredient-name" name="ingredient" type="text" autocomplete="off" placeholder="예: 브로콜리" aria-describedby="add-error">
+            </div>
+            <button type="submit" class="primary add-submit">냉장고에 담기</button>
+          </div>
+          <p id="add-error" class="field-error" role="alert" hidden></p>
+        </form>
         <div class="filters" role="group" aria-label="식재료 카테고리">
-          ${[['all', '전체'], ...groups].map(([id, name]) =>
-            `<button type="button" data-category="${id}" aria-pressed="${id === category}">${name}</button>`).join('')}
         </div>
         <div id="catalog-items"></div>
       </section>
@@ -121,6 +156,7 @@ function renderFridge() {
     </div>`;
   document.querySelector('#search').value = query;
   document.querySelector('[data-action="clear"]').hidden = !query;
+  renderFilters();
   renderCatalog();
   updateFridge();
 }
@@ -132,11 +168,22 @@ function matches(name) {
     const start = 0xac00 + initials.indexOf(char) * 588;
     return `[${String.fromCharCode(start)}-${String.fromCharCode(start + 587)}]`;
   }).join('');
-  return new RegExp(pattern).test(name);
+  return new RegExp(pattern).test(nameKey(name));
+}
+
+function catalogGroups() {
+  if (!custom.size) return groups;
+  const items = [...custom].map(([id, item]) => [id, item.name]);
+  return [['custom', '직접 추가', 'plus', items], ...groups];
+}
+
+function renderFilters() {
+  document.querySelector('.filters').innerHTML = [['all', '전체'], ...catalogGroups()].map(([id, name]) =>
+    `<button type="button" data-category="${id}" aria-pressed="${id === category}">${name}</button>`).join('');
 }
 
 function renderCatalog() {
-  const content = groups.filter(([id]) => category === 'all' || id === category)
+  const content = catalogGroups().filter(([id]) => category === 'all' || id === category)
     .map(([id, label, glyph, items]) => {
       const found = items.filter(([, name]) => matches(name));
       if (!found.length) return '';
@@ -144,7 +191,7 @@ function renderCatalog() {
         <div class="chips">${found.map(([item]) => chip(item)).join('')}</div></section>`;
     }).join('');
   document.querySelector('#catalog-items').innerHTML = content ||
-    '<p class="empty-search" role="status">일치하는 식재료가 없어요. 기본 재료 태그에서 골라보세요</p>';
+    '<p class="empty-search" role="status">일치하는 식재료가 없어요. 재료 추가를 눌러 직접 등록할 수 있어요.</p>';
 }
 
 function updateFridge() {
@@ -154,21 +201,24 @@ function updateFridge() {
   document.querySelector('#selection-count').textContent = `${owned.size} / 30개`;
   document.querySelector('#cta-count').textContent = `${owned.size}개 선택됨`;
   document.querySelector('#summary-items').innerHTML = owned.size
-    ? `<div class="summary-items">${[...owned].map(id => `<button type="button" class="summary-chip" data-remove="${id}" aria-label="${ingredients[id].name} 제거">${symbol(id)}${ingredients[id].name}${icon('close', 12)}</button>`).join('')}</div>`
+    ? `<div class="summary-items">${[...owned].map(id => {
+      const {name} = ingredientInfo(id);
+      return `<button type="button" class="summary-chip" data-remove="${id}" aria-label="${name} 제거">${symbol(id)}${name}${icon('close', 12)}</button>`;
+    }).join('')}</div>`
     : `<div class="summary-empty">${icon('fridge', 27)}<span>아직 선택한 재료가 없어요.</span></div>`;
 }
 
 function toggleIngredient(id, fromSummary) {
-  const next = getOwned();
-  if (next.has(id)) {
-    next.delete(id);
-  } else if (next.size === 30) {
+  const next = readFridge();
+  if (next.owned.has(id)) {
+    next.owned.delete(id);
+  } else if (next.owned.size === 30) {
     showToast('식재료는 최대 30개까지 선택할 수 있어요');
     return;
   } else {
-    next.add(id);
+    next.owned.add(id);
   }
-  if (!saveOwned(next)) {
+  if (!saveFridge(next)) {
     showToast('재료 상태를 저장하지 못했어요. 다시 한번 눌러주세요');
     return;
   }
@@ -176,6 +226,56 @@ function toggleIngredient(id, fromSummary) {
   if (fromSummary) {
     (document.querySelector('[data-remove]') || document.querySelector('[data-action="recommend"]')).focus();
   }
+}
+
+function showAddError(message) {
+  const error = document.querySelector('#add-error');
+  const input = document.querySelector('#ingredient-name');
+  error.textContent = message;
+  error.hidden = !message;
+  input.setAttribute('aria-invalid', Boolean(message));
+}
+
+function toggleAddForm(button) {
+  const form = document.querySelector('#ingredient-form');
+  form.hidden = !form.hidden;
+  button.setAttribute('aria-expanded', !form.hidden);
+  if (!form.hidden) {
+    const input = form.elements.ingredient;
+    if (!input.value && validName(query)) input.value = query;
+    input.focus();
+  }
+}
+
+function addIngredient(input) {
+  const name = input.value.normalize('NFC').trim().replace(/ +/g, ' ');
+  if (!validName(name)) {
+    showAddError('재료 이름을 한글 10자 이내로 입력해 주세요.');
+    input.focus();
+    return;
+  }
+  const next = readFridge();
+  const existing = Object.values(ingredients).find(item => nameKey(item.name) === nameKey(name));
+  const id = existing?.id ?? customId(name);
+  if (next.owned.has(id)) {
+    showAddError('이미 냉장고에 담긴 재료예요.');
+    return;
+  }
+  if (next.owned.size === 30) {
+    showAddError('재료를 추가하려면 냉장고에서 재료를 하나 빼주세요.');
+    return;
+  }
+  if (!existing && !next.custom.has(id)) next.custom.set(id, {name, emoji:'🧺'});
+  next.owned.add(id);
+  if (!saveFridge(next)) {
+    showAddError('재료를 저장하지 못했어요. 다시 한번 눌러주세요.');
+    return;
+  }
+  query = '';
+  category = existing ? 'all' : 'custom';
+  renderFridge();
+  document.querySelector('[data-action="add"]').focus();
+  showToast(`${ingredientInfo(id).name} 재료를 냉장고에 담았어요`);
 }
 
 function rank() {
@@ -307,9 +407,9 @@ function openSheet(recipe) {
 function finishCooking(remove) {
   const checked = [...sheet.querySelectorAll('input:checked')];
   if (remove && checked.length) {
-    const next = getOwned();
-    checked.forEach(input => next.delete(input.value));
-    if (!saveOwned(next)) {
+    const next = readFridge();
+    checked.forEach(input => next.owned.delete(input.value));
+    if (!saveFridge(next)) {
       sheet.querySelector('.sheet-error').hidden = false;
       return;
     }
@@ -357,9 +457,15 @@ function updateQuery(input) {
 
 app.addEventListener('input', event => {
   if (event.target.id === 'search' && !event.isComposing) updateQuery(event.target);
+  if (event.target.id === 'ingredient-name') showAddError('');
 });
 app.addEventListener('compositionend', event => {
   if (event.target.id === 'search') updateQuery(event.target);
+});
+app.addEventListener('submit', event => {
+  if (event.target.id !== 'ingredient-form') return;
+  event.preventDefault();
+  addIngredient(event.target.elements.ingredient);
 });
 
 app.addEventListener('click', event => {
@@ -378,6 +484,7 @@ app.addEventListener('click', event => {
     updateQuery(input);
     input.focus();
   }
+  if (action === 'add') toggleAddForm(button);
   if (action === 'recommend') {
     if (!owned.size) showToast(emptyFridge);
     else {
@@ -404,10 +511,14 @@ sheet.addEventListener('click', event => {
 window.addEventListener('hashchange', () => renderRoute(true));
 window.addEventListener('storage', event => {
   if (event.key === fridgeKey || event.key === null) {
-    owned = getOwned();
+    ({owned, custom} = readFridge());
     offset = 0;
-    if (document.querySelector('#summary-items')) updateFridge();
-    else renderRoute();
+    if (document.querySelector('#summary-items')) {
+      if (!custom.size && category === 'custom') category = 'all';
+      renderFilters();
+      renderCatalog();
+      updateFridge();
+    } else renderRoute();
   }
 });
 renderRoute();

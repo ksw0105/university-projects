@@ -36,6 +36,13 @@ h1 { font-size:clamp(25px,3.1vw,38px); font-weight:800; letter-spacing:-.055em; 
 .panel-heading h2,.summary h2 { font-size:19px; letter-spacing:-.04em; }
 .panel-heading p,.summary-help { color:var(--muted); margin-top:3px; font-size:13px; }
 .count { white-space:nowrap; color:var(--deep); background:var(--mint); padding:5px 10px; border-radius:50px; font-weight:700; font-size:12px; }
+.catalog-tools { display:flex; align-items:stretch; gap:8px; }
+.catalog-tools .search-box { flex:1; min-width:0; }
+.catalog-tools .add-toggle,.catalog-tools .add-submit { flex:none; min-height:46px; padding:8px 10px; font-size:13px; white-space:nowrap; }
+.catalog-tools .add-toggle { color:var(--deep); }
+.ingredient-form { margin-top:10px; padding:11px; border:1px solid var(--line); border-radius:12px; background:var(--canvas); }
+.ingredient-form label { display:block; color:var(--body); font-weight:750; margin-bottom:6px; }
+.ingredient-form .search-box { background:white; }
 .search-box { display:flex; align-items:center; gap:10px; padding:0 12px; border-radius:12px; border:1px solid var(--line); background:var(--canvas); color:var(--muted); }
 .search-box:focus-within { border-color:#059669; box-shadow:0 0 0 3px #10b98122; }
 .search-box:has([aria-invalid="true"]) { border-color:#ef4444; }
