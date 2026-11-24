@@ -28,6 +28,7 @@ let category = 'all';
 let query = '';
 let offset = 0;
 let toastTimer;
+let recipeRequest;
 const refreshLimit = 5;
 const pageSize = 3;
 const refreshEnd = '추천 가능한 메뉴를 모두 확인했어요. 재료를 추가해 보세요';
@@ -314,6 +315,7 @@ function card({recipe, have, missing}) {
 }
 
 function renderResults() {
+  recipeRequest?.abort();
   const ranked = rank();
   if (offset >= ranked.length) offset = 0;
   const visible = ranked.slice(offset, offset + pageSize);
@@ -334,7 +336,99 @@ function renderResults() {
     ${visible.length ? `<div class="cards">${visible.map(card).join('')}</div>
       <div class="result-action"><button type="button" class="secondary" data-action="refresh" aria-disabled="${blocked}">
         ${icon('refresh', 18)} 다른 메뉴 3개 더 보기 (남은 횟수 ${remaining}/5)</button></div>`
-      : `<div class="panel empty-result"><h2>추천할 메뉴가 아직 없어요</h2><p>${emptyCopy}</p><a class="primary" href="#fridge">식재료 선택하기</a></div>`}`;
+      : `<div class="panel empty-result"><h2>추천할 메뉴가 아직 없어요</h2><p>${emptyCopy}</p><a class="primary" href="#fridge">식재료 선택하기</a></div>`}
+    ${owned.size ? onlineSection() : ''}`;
+}
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char =>
+    ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[char]);
+}
+
+function onlineSection() {
+  const names = [...owned].sort((a, b) => Number(custom.has(b)) - Number(custom.has(a)))
+    .map(id => ingredientInfo(id).name);
+  return `<section class="online-section" aria-label="온라인 레시피">
+    <button type="button" class="secondary" data-action="online" aria-expanded="false" aria-controls="online-panel">
+      ${icon('search', 17)} 더 많은 레시피 찾기</button>
+    <div id="online-panel" hidden>
+      <form id="online-form" class="online-form">
+        <label for="online-ingredient">어떤 재료로 찾을까요?</label>
+        <select id="online-ingredient" name="ingredient">
+          ${names.map(name => `<option>${escapeHTML(name)}</option>`).join('')}
+        </select>
+        <button type="submit" class="primary">찾기</button>
+      </form>
+      <p class="online-status" role="status" aria-live="polite"></p>
+      <div class="online-recipes"></div>
+      <a class="back online-fallback" target="_blank" rel="noopener noreferrer" hidden>웹에서 레시피 검색 ${icon('arrow', 15)}</a>
+      <a class="online-source" href="https://www.data.go.kr/data/15060073/openapi.do" target="_blank" rel="noopener noreferrer">출처 · 식품의약품안전처 조리식품의 레시피 DB</a>
+    </div>
+  </section>`;
+}
+
+function onlineCard(recipe) {
+  const image = typeof recipe.image === 'string' && /^https:\/\/(?:www\.|openapi\.)?foodsafetykorea\.go\.kr\//.test(recipe.image)
+    ? `<div class="card-image"><img src="${escapeHTML(recipe.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : '';
+  return `<details class="panel online-card">
+    <summary>${image}<span class="online-card-title">${escapeHTML(recipe.name)} ${icon('arrow', 16)}</span>
+      ${recipe.category ? `<span class="card-meta">${escapeHTML(recipe.category)}</span>` : ''}</summary>
+    <div class="online-card-body">
+      ${recipe.ingredients ? `<h3>필요한 재료</h3><p class="online-ingredients">${escapeHTML(recipe.ingredients)}</p>` : ''}
+      ${recipe.steps?.length ? `<h3>조리 순서</h3><ol>${recipe.steps.map(step => `<li>${escapeHTML(step)}</li>`).join('')}</ol>` : ''}
+    </div>
+  </details>`;
+}
+
+async function loadOnlineRecipes(form) {
+  const panel = form.parentElement;
+  const ingredient = form.elements.ingredient.value;
+  const status = panel.querySelector('.online-status');
+  const results = panel.querySelector('.online-recipes');
+  const link = panel.querySelector('.online-fallback');
+  const button = form.querySelector('button');
+  recipeRequest?.abort();
+  const request = new AbortController();
+  recipeRequest = request;
+  results.innerHTML = '';
+  link.hidden = true;
+  link.href = 'https://www.google.com/search?' + new URLSearchParams({q: `${ingredient} 요리 레시피`});
+  button.disabled = true;
+  status.textContent = `${ingredient} 레시피를 불러오는 중이에요…`;
+
+  try {
+    const response = await fetch('/api/recipes?' + new URLSearchParams({ingredient}), {signal: request.signal});
+    const payload = await response.json();
+    if (request.signal.aborted || !panel.isConnected) return;
+    if (payload.error === 'source_not_configured') {
+      status.textContent = '식품안전나라 연동에 인증키가 필요해요. 지금은 웹에서 레시피를 검색할 수 있어요.';
+      link.hidden = false;
+      return;
+    }
+    if (!response.ok || !Array.isArray(payload.recipes)) throw new Error('Could not load recipes');
+    const found = payload.recipes;
+    status.textContent = found.length ? `${ingredient} 레시피 ${found.length}개를 찾았어요.` : `${ingredient} 레시피를 찾지 못했어요. 다른 재료로 검색해 보세요.`;
+    results.innerHTML = found.map(onlineCard).join('');
+    link.hidden = Boolean(found.length);
+  } catch {
+    if (request.signal.aborted || !panel.isConnected) return;
+    status.textContent = '온라인 레시피를 불러오지 못했어요. 다시 시도하거나 웹에서 검색할 수 있어요.';
+    link.hidden = false;
+  } finally {
+    if (recipeRequest === request) {
+      button.disabled = false;
+      recipeRequest = undefined;
+    }
+  }
+}
+
+function toggleOnline(button) {
+  const panel = document.querySelector('#online-panel');
+  panel.hidden = !panel.hidden;
+  button.setAttribute('aria-expanded', !panel.hidden);
+  if (!panel.hidden && !panel.querySelector('.online-status').textContent) {
+    loadOnlineRecipes(panel.querySelector('form'));
+  }
 }
 
 function moreResults() {
@@ -424,6 +518,7 @@ function finishCooking(remove) {
 }
 
 function renderRoute(focus = false) {
+  recipeRequest?.abort();
   if (sheet.open) sheet.close();
   const route = location.hash.slice(1);
   const recipeRoute = route.startsWith('recipe/');
@@ -463,9 +558,13 @@ app.addEventListener('compositionend', event => {
   if (event.target.id === 'search') updateQuery(event.target);
 });
 app.addEventListener('submit', event => {
-  if (event.target.id !== 'ingredient-form') return;
-  event.preventDefault();
-  addIngredient(event.target.elements.ingredient);
+  if (event.target.id === 'ingredient-form') {
+    event.preventDefault();
+    addIngredient(event.target.elements.ingredient);
+  } else if (event.target.id === 'online-form') {
+    event.preventDefault();
+    loadOnlineRecipes(event.target);
+  }
 });
 
 app.addEventListener('click', event => {
@@ -485,6 +584,7 @@ app.addEventListener('click', event => {
     input.focus();
   }
   if (action === 'add') toggleAddForm(button);
+  if (action === 'online') toggleOnline(button);
   if (action === 'recommend') {
     if (!owned.size) showToast(emptyFridge);
     else {
